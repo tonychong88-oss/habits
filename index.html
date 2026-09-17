@@ -13,13 +13,15 @@
 :root{
   --bg:#EEF1EC; --surface:#FFFFFF; --ink:#1D2B2A; --muted:#5F6F6C; --line:#D5DCD6;
   --accent:#2B6E8A; --on-accent:#FFFFFF; --done:#2F8A5B; --streak:#A8690F;
+  --rest:#4E57A0; --rest-bg:#DFE2F2;
   --radius-lg:18px; --radius-sm:10px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark){
   :root{--bg:#141A1A; --surface:#1D2524; --ink:#E6ECE9; --muted:#9AA8A5; --line:#2E3937;
-    --accent:#6FB3CF; --on-accent:#0E1A1F; --done:#53B882; --streak:#E3A64A;}
+    --accent:#6FB3CF; --on-accent:#0E1A1F; --done:#53B882; --streak:#E3A64A;
+    --rest:#B4BAEC; --rest-bg:#2B3150;}
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink)}
@@ -51,6 +53,8 @@ h1,h2,h3,p{margin:0}
 .check svg{width:24px;height:24px;opacity:0;transform:scale(.6);transition:opacity .15s,transform .2s}
 .row.done .check{background:var(--done);border-color:var(--done);color:#fff}
 .row.done .check svg{opacity:1;transform:scale(1)}
+.row.rest .check{border-color:var(--rest);border-style:dashed;color:var(--rest)}
+.restlabel{color:var(--rest);font-weight:600}
 .rowbody{flex:1;min-width:0;text-align:left;display:grid;gap:5px}
 .name{font-size:1.08rem;font-weight:620;overflow-wrap:anywhere}
 .meta{font-size:.88rem;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
@@ -59,6 +63,7 @@ h1,h2,h3,p{margin:0}
 .strip{display:flex;gap:4px;margin-top:2px}
 .strip i{font-style:normal;font-size:.68rem;width:20px;height:20px;border-radius:5px;display:grid;place-items:center;background:var(--bg);color:var(--muted)}
 .strip i.on{background:var(--done);color:#fff}
+.strip i.rest{background:var(--rest-bg);color:var(--rest)}
 .strip i.now{box-shadow:inset 0 0 0 1.5px var(--ink)}
 
 .empty{padding:40px 8px;text-align:center;color:var(--muted)}
@@ -83,13 +88,19 @@ h1,h2,h3,p{margin:0}
 .cal .dow{font-size:.75rem;color:var(--muted);padding:4px 0}
 .day{aspect-ratio:1;border-radius:10px;display:grid;place-items:center;position:relative;font-variant-numeric:tabular-nums;font-size:.95rem}
 .day.on{background:var(--done);color:#fff}
+.day.rest{background:var(--rest-bg);color:var(--rest);font-weight:600}
 .day.now{box-shadow:inset 0 0 0 2px var(--ink)}
 .day.sel{outline:3px solid var(--accent);outline-offset:1px}
 .day:disabled{opacity:.35;cursor:default}
 .day .dot{position:absolute;bottom:4px;width:5px;height:5px;border-radius:50%;background:currentColor;opacity:.7}
-.selday{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.selday{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px 12px;margin-bottom:10px}
+.pills{display:flex;gap:8px;flex-wrap:wrap}
 .pill{padding:10px 16px;border-radius:999px;border:2px solid var(--done);color:var(--done);font-weight:620;flex:none}
 .pill.on{background:var(--done);color:#fff}
+.pill.restpill{border-color:var(--rest);color:var(--rest)}
+.pill.restpill.on{background:var(--rest);border-color:var(--rest);color:var(--surface)}
+.pill:disabled{opacity:.45;cursor:default}
+.resthint{font-size:.85rem;color:var(--muted);margin:-2px 0 10px}
 textarea,input[type=text],select{width:100%;background:var(--bg);border:1.5px solid var(--line);border-radius:var(--radius-sm);padding:12px;font-size:1rem}
 textarea{resize:vertical;line-height:1.5}
 .danger{color:#B3261E;padding:14px 0;font-weight:600}
@@ -126,6 +137,7 @@ const ICON = {
   back:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
   next:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>',
   edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg>',
+  moon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:1;transform:none"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>',
   save:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>'
 };
 
@@ -158,19 +170,43 @@ function save(){
 /* ---------- logic ---------- */
 const entry = (h,k) => state.logs[h.id]?.[k];
 const isDone = (h,d) => !!entry(h, key(d))?.d;
+const REST_PER_WEEK = 2;
+// Rest days only apply to "Every day" habits; weekly-target habits already allow days off.
+const isRest = (h,d) => !h.target && !entry(h, key(d))?.d && !!entry(h, key(d))?.r;
 function setEntry(h,k,patch){
   const L = state.logs[h.id] || (state.logs[h.id] = {});
   const e = { ...(L[k]||{}), ...patch };
-  if (!e.d && !e.n) delete L[k]; else L[k] = e;
+  if (e.d) e.r = 0;                       // a done day can't also be a rest day
+  if (!e.r) delete e.r;
+  if (!e.d && !e.n && !e.r) delete L[k]; else L[k] = e;
   save();
 }
 function toggle(h,d){ const k = key(d); setEntry(h, k, { d: entry(h,k)?.d ? 0 : 1 }); }
 function weekCount(h,ws){ let c=0; for(let i=0;i<7;i++) if(isDone(h, addDays(ws,i))) c++; return c; }
+// Rest days used in the Mon–Sun week containing d (optionally ignoring one date)
+function restCount(h,d,exceptKey){
+  const ws = weekStart(d); let c = 0;
+  for (let i=0;i<7;i++){ const x = addDays(ws,i); if (key(x)!==exceptKey && isRest(h,x)) c++; }
+  return c;
+}
+const canRest = (h,d) => !h.target && (isRest(h,d) || restCount(h,d,key(d)) < REST_PER_WEEK);
+function toggleRest(h,d){
+  const k = key(d);
+  if (isRest(h,d)){ setEntry(h, k, { r:0 }); return true; }
+  if (!canRest(h,d)){ toast(`You've already used ${REST_PER_WEEK} rest days that week.`); return false; }
+  setEntry(h, k, { d:0, r:1 }); return true;
+}
 function streak(h){
   const t = today();
   if (!h.target){
-    let d = isDone(h,t) ? t : addDays(t,-1), n = 0;
-    while (isDone(h,d)){ n++; d = addDays(d,-1); }
+    // Count done days back from today. Rest days keep the streak alive but don't add to it.
+    // If today isn't logged yet, start from yesterday so the streak isn't lost mid-day.
+    let d = (isDone(h,t) || isRest(h,t)) ? t : addDays(t,-1), n = 0;
+    for (let g=0; g<3660; g++){
+      if (isDone(h,d)) n++;
+      else if (!isRest(h,d)) break;
+      d = addDays(d,-1);
+    }
     return n;
   }
   let w = weekStart(t), n = 0;
@@ -207,15 +243,17 @@ function viewToday(){
     `<button class="chip ${ui.filter===f?'on':''}" data-act="filter" data-f="${f}" aria-pressed="${ui.filter===f}">${{all:'All',habit:'Habits',exercise:'Exercises'}[f]}</button>`).join('')}</div>` : ''}
   <ul class="list">
   ${list.map(h => {
-    const done = isDone(h,t), n = streak(h);
-    const meta = h.target ? `${weekCount(h,ws)} of ${h.target} this week` : 'Every day';
-    return `<li class="row ${done?'done':''}">
-      <button class="check" data-act="toggle" data-id="${h.id}" aria-pressed="${done}" aria-label="Mark ${esc(h.name)} done today">${ICON.check}</button>
+    const done = isDone(h,t), rest = isRest(h,t), n = streak(h), used = h.target ? 0 : restCount(h,t);
+    const meta = h.target ? `${weekCount(h,ws)} of ${h.target} this week`
+      : rest ? `<span class="restlabel">Rest day</span>`
+      : `Every day${used ? ` · ${used} of ${REST_PER_WEEK} rest days used` : ''}`;
+    return `<li class="row ${done?'done':''} ${rest?'rest':''}">
+      <button class="check" data-act="toggle" data-id="${h.id}" aria-pressed="${done}" aria-label="Mark ${esc(h.name)} done today${rest?' (currently a rest day)':''}">${rest ? ICON.moon : ICON.check}</button>
       <button class="rowbody" data-act="open" data-id="${h.id}">
         <span class="name">${esc(h.name)}</span>
         <span class="meta">${h.kind==='exercise'?'<span class="tag">Exercise</span>':''}<span>${meta}</span>${n?`<span class="streak">${streakText(h)} streak</span>`:''}</span>
         <span class="strip" aria-hidden="true">${letters.map((l,i) => { const d = addDays(ws,i);
-          return `<i class="${isDone(h,d)?'on':''} ${key(d)===key(t)?'now':''}">${l}</i>`; }).join('')}</span>
+          return `<i class="${isDone(h,d)?'on':''} ${isRest(h,d)?'rest':''} ${key(d)===key(t)?'now':''}">${l}</i>`; }).join('')}</span>
       </button>
     </li>`;
   }).join('')}
@@ -237,8 +275,9 @@ function viewDetail(){
   for (let d=1; d<=dim; d++){
     const date = new Date(m.getFullYear(), m.getMonth(), d), k = key(date), en = entry(h,k) || {};
     if (en.d) monthDone++;
-    cells += `<button class="day ${en.d?'on':''} ${k===tk?'now':''} ${k===sel?'sel':''}" data-act="day" data-k="${k}" ${date>t?'disabled':''}
-      aria-label="${date.toLocaleDateString('en-AU',{day:'numeric',month:'long'})}${en.d?', done':''}${en.n?', has note':''}">${d}${en.n?'<span class="dot"></span>':''}</button>`;
+    const r = isRest(h,date);
+    cells += `<button class="day ${en.d?'on':''} ${r?'rest':''} ${k===tk?'now':''} ${k===sel?'sel':''}" data-act="day" data-k="${k}" ${date>t?'disabled':''}
+      aria-label="${date.toLocaleDateString('en-AU',{day:'numeric',month:'long'})}${en.d?', done':''}${r?', rest day':''}${en.n?', has note':''}">${d}${en.n?'<span class="dot"></span>':''}</button>`;
   }
   const isThisMonth = m.getFullYear()===t.getFullYear() && m.getMonth()===t.getMonth();
   const selLabel = sel===tk ? 'Today' : selD.toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'});
@@ -268,8 +307,14 @@ function viewDetail(){
   <section class="panel">
     <div class="selday">
       <h3 style="margin:0">${selLabel}</h3>
-      <button class="pill ${e.d?'on':''}" data-act="toggleSel" aria-pressed="${!!e.d}">${e.d?'Done':'Mark done'}</button>
+      <div class="pills">
+        <button class="pill ${e.d?'on':''}" data-act="toggleSel" aria-pressed="${!!e.d}">${e.d?'Done':'Mark done'}</button>
+        ${h.target ? '' : (() => { const r = isRest(h,selD), ok = canRest(h,selD);
+          return `<button class="pill restpill ${r?'on':''}" data-act="restSel" aria-pressed="${r}" ${ok?'':'disabled'}>Rest day</button>`; })()}
+      </div>
     </div>
+    ${h.target ? '' : (() => { const used = restCount(h,selD);
+      return `<p class="resthint">${used} of ${REST_PER_WEEK} rest days used ${weekStart(selD).getTime()===weekStart(t).getTime()?'this week':'that week'}. Rest days keep your streak going.</p>`; })()}
     <textarea id="note" rows="3" placeholder="${h.kind==='exercise'?'Weights, reps, how it felt…':'Notes for this day…'}">${esc(e.n)}</textarea>
   </section>
   <button class="danger" data-act="delete">Delete ${h.kind==='exercise'?'exercise':'habit'}</button>`;
@@ -345,6 +390,7 @@ app.addEventListener('click', ev => {
     }
     case 'day': ui.selDate = b.dataset.k; replace(); render(); break;
     case 'toggleSel': toggle(h, fromKey(ui.selDate || key(today()))); render(); break;
+    case 'restSel': if (toggleRest(h, fromKey(ui.selDate || key(today())))){ navigator.vibrate?.(12); render(); } break;
     case 'save': saveForm(); break;
     case 'delete':
       if (confirm(`Delete "${h.name}" and all its history? This can't be undone.`)){
