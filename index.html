@@ -66,6 +66,13 @@ h1,h2,h3,p{margin:0}
 .strip i.rest{background:var(--rest-bg);color:var(--rest)}
 .strip i.now{box-shadow:inset 0 0 0 1.5px var(--ink)}
 
+.iconrow{display:flex;gap:4px}
+.icon.on{background:var(--accent);color:var(--on-accent)}
+.grip{width:46px;height:46px;display:grid;place-items:center;flex:none;touch-action:none;color:var(--muted);cursor:grab;border-radius:var(--radius-sm)}
+.grip:active{cursor:grabbing}
+.grip svg{width:22px;height:22px}
+.row.dragging{box-shadow:0 10px 24px rgba(20,40,50,.22);position:relative;z-index:5}
+
 .empty{padding:40px 8px;text-align:center;color:var(--muted)}
 .fab{position:fixed;right:max(18px,calc(50% - 262px));bottom:calc(env(safe-area-inset-bottom) + 22px);display:flex;gap:6px;align-items:center;background:var(--accent);color:var(--on-accent);padding:14px 22px 14px 18px;border-radius:999px;font-weight:650;box-shadow:0 6px 18px rgba(20,40,50,.25)}
 .fab svg{width:22px;height:22px}
@@ -138,7 +145,9 @@ const ICON = {
   next:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>',
   edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg>',
   moon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:1;transform:none"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>',
-  save:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>'
+  save:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>',
+  reorder:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
+  grip:'<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>'
 };
 
 /* ---------- dates ---------- */
@@ -218,8 +227,28 @@ function streak(h){
 const schedule = h => h.target ? `${h.target}× a week` : 'Every day';
 const streakText = h => { const n = streak(h); return h.target ? plural(n,'week') : plural(n,'day'); };
 
+/* ---------- reordering ---------- */
+// Replaces the habits that match the current filter with `newOrderIds`, in that
+// order, while leaving other habits in their original relative positions.
+function applyReorder(newOrderIds){
+  const order = new Set(newOrderIds);
+  const byId = Object.fromEntries(state.habits.map(h => [h.id, h]));
+  let i = 0;
+  state.habits = state.habits.map(h => order.has(h.id) ? byId[newOrderIds[i++]] : h);
+  save();
+}
+function moveInFiltered(h, dir){
+  const ids = state.habits.filter(x => ui.filter==='all' || x.kind===ui.filter).map(x => x.id);
+  const i = ids.indexOf(h.id), j = i + dir;
+  if (i<0 || j<0 || j>=ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  applyReorder(ids);
+  render();
+  document.querySelector(`[data-act="grip"][data-id="${h.id}"]`)?.focus();
+}
+
 /* ---------- navigation (works with Android back button) ---------- */
-const ui = { view:'today', habitId:null, filter:'all', month:null, selDate:null, editId:null };
+const ui = { view:'today', habitId:null, filter:'all', month:null, selDate:null, editId:null, reorder:false };
 function go(view, params={}){ Object.assign(ui, {view}, params); history.pushState({...ui}, ''); render(); scrollTo(0,0); }
 function replace(){ history.replaceState({...ui}, ''); }
 window.addEventListener('popstate', e => { Object.assign(ui, e.state || {view:'today'}); render(); });
@@ -230,19 +259,30 @@ function viewToday(){
   const list = state.habits.filter(h => ui.filter==='all' || h.kind===ui.filter);
   const doneToday = state.habits.filter(h => isDone(h,t)).length;
   const letters = ['M','T','W','T','F','S','S'];
+  const canReorder = state.habits.length > 1;
   return `
   <header class="top">
     <div>
       <p class="muted">${t.toLocaleDateString('en-AU',{weekday:'long'})}</p>
       <h1>${t.toLocaleDateString('en-AU',{day:'numeric',month:'long'})}</h1>
     </div>
-    <button class="icon" data-act="settings" aria-label="Backup">${ICON.save}</button>
+    <div class="iconrow">
+      ${canReorder ? `<button class="icon ${ui.reorder?'on':''}" data-act="reorder" aria-pressed="${ui.reorder}" aria-label="${ui.reorder?'Done reordering':'Reorder list'}">${ui.reorder ? ICON.check : ICON.reorder}</button>` : ''}
+      <button class="icon" data-act="settings" aria-label="Backup">${ICON.save}</button>
+    </div>
   </header>
-  ${state.habits.length ? `<p class="summary">${doneToday} of ${state.habits.length} done today</p>` : '<p class="summary">&nbsp;</p>'}
+  ${ui.reorder ? `<p class="summary">Drag the handle to reorder, or focus it and use the arrow keys.</p>`
+    : state.habits.length ? `<p class="summary">${doneToday} of ${state.habits.length} done today</p>` : '<p class="summary">&nbsp;</p>'}
   ${state.habits.length ? `<div class="chips">${['all','habit','exercise'].map(f =>
     `<button class="chip ${ui.filter===f?'on':''}" data-act="filter" data-f="${f}" aria-pressed="${ui.filter===f}">${{all:'All',habit:'Habits',exercise:'Exercises'}[f]}</button>`).join('')}</div>` : ''}
-  <ul class="list">
-  ${list.map(h => {
+  <ul class="list ${ui.reorder?'reorder':''}">
+  ${list.map(h => ui.reorder ? `<li class="row" data-id="${h.id}">
+      <button class="grip" data-act="grip" data-id="${h.id}" aria-label="Reorder ${esc(h.name)}: press arrow up or down to move, or drag">${ICON.grip}</button>
+      <span class="rowbody">
+        <span class="name">${esc(h.name)}</span>
+        ${h.kind==='exercise' ? '<span class="meta"><span class="tag">Exercise</span></span>' : ''}
+      </span>
+    </li>` : (() => {
     const done = isDone(h,t), rest = isRest(h,t), n = streak(h), used = h.target ? 0 : restCount(h,t);
     const meta = h.target ? `${weekCount(h,ws)} of ${h.target} this week`
       : rest ? `<span class="restlabel">Rest day</span>`
@@ -256,10 +296,10 @@ function viewToday(){
           return `<i class="${isDone(h,d)?'on':''} ${isRest(h,d)?'rest':''} ${key(d)===key(t)?'now':''}">${l}</i>`; }).join('')}</span>
       </button>
     </li>`;
-  }).join('')}
+  })()).join('')}
   </ul>
   ${!list.length ? `<div class="empty"><p>${state.habits.length ? 'Nothing in this list yet.' : 'Add a habit or exercise to start tracking.'}</p></div>` : ''}
-  <button class="fab" data-act="new">${ICON.plus}Add</button>`;
+  ${!ui.reorder ? `<button class="fab" data-act="new">${ICON.plus}Add</button>` : ''}`;
 }
 
 function viewDetail(){
@@ -384,6 +424,7 @@ app.addEventListener('click', ev => {
     case 'settings': go('settings'); break;
     case 'back': history.back(); break;
     case 'filter': ui.filter = b.dataset.f; replace(); render(); break;
+    case 'reorder': ui.reorder = !ui.reorder; replace(); render(); break;
     case 'month': {
       const t = today(), m = ui.month ? new Date(ui.month) : new Date(t.getFullYear(), t.getMonth(), 1);
       m.setMonth(m.getMonth() + Number(b.dataset.dir)); ui.month = m; replace(); render(); break;
@@ -410,6 +451,45 @@ app.addEventListener('input', ev => {
 
 app.addEventListener('change', ev => {
   if (ev.target.id === 'importFile' && ev.target.files[0]) importData(ev.target.files[0]);
+});
+
+/* ---------- drag to reorder ---------- */
+let drag = null;
+app.addEventListener('pointerdown', ev => {
+  const grip = ev.target.closest('[data-act="grip"]'); if (!grip) return;
+  const row = grip.closest('.row'), list = row.closest('.list');
+  ev.preventDefault();
+  drag = { pointerId: ev.pointerId, row, list, startY: ev.clientY };
+  row.classList.add('dragging');
+  try{ grip.setPointerCapture(ev.pointerId); }catch(e){}
+});
+document.addEventListener('pointermove', ev => {
+  if (!drag || ev.pointerId !== drag.pointerId) return;
+  const dy = ev.clientY - drag.startY;
+  drag.row.style.transform = `translateY(${dy}px)`;
+  const rect = drag.row.getBoundingClientRect(), centerY = rect.top + rect.height/2;
+  const siblings = [...drag.list.querySelectorAll('.row:not(.dragging)')];
+  const target = siblings.find(sib => centerY < sib.getBoundingClientRect().top + sib.getBoundingClientRect().height/2);
+  if (target) drag.list.insertBefore(drag.row, target);
+  else drag.list.appendChild(drag.row);
+});
+function endDrag(ev){
+  if (!drag || ev.pointerId !== drag.pointerId) return;
+  const { row, list } = drag;
+  row.style.transform = '';
+  row.classList.remove('dragging');
+  const ids = [...list.querySelectorAll('.row')].map(r => r.dataset.id);
+  drag = null;
+  applyReorder(ids);
+}
+document.addEventListener('pointerup', endDrag);
+document.addEventListener('pointercancel', endDrag);
+app.addEventListener('keydown', ev => {
+  if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
+  const grip = ev.target.closest('[data-act="grip"]'); if (!grip) return;
+  ev.preventDefault();
+  const h = state.habits.find(x => x.id === grip.dataset.id);
+  if (h) moveInFiltered(h, ev.key==='ArrowUp' ? -1 : 1);
 });
 
 function saveForm(){
